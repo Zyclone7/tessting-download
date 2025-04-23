@@ -8,7 +8,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Loader, Wallet, Check, AlertCircle, Info, Tag, Percent, CreditCard, PhilippinePeso } from "lucide-react";
+import { Loader, Wallet, Check, AlertCircle, Info, Tag, Percent, CreditCard } from "lucide-react";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "@/hooks/use-toast";
 import { getUserProfile } from "@/actions/user";
@@ -126,7 +126,7 @@ export const TelcoPaymentDialog = ({
   const serviceAmount = pricing.subtotal;
   const serviceFee = bookingDetails?.serviceFee || 0;
   const totalAmount = pricing.total;
-  const hasEnoughCredits = userCredit >= serviceAmount;
+  const hasEnoughCredits = userCredit >= totalAmount; // Check against total amount including service fee
 
   // Fetch user KYC status and role
   useEffect(() => {
@@ -181,7 +181,7 @@ export const TelcoPaymentDialog = ({
       toast({
         title: "Payment Successful",
         description: paymentMethod === "credits" 
-          ? `₱${serviceAmount.toFixed(2)} has been deducted from your credits.`
+          ? `₱${totalAmount.toFixed(2)} has been deducted from your credits.`
           : `Your ${paymentMethod} payment was processed successfully.`,
       });
     } catch (error) {
@@ -193,6 +193,7 @@ export const TelcoPaymentDialog = ({
       });
     } finally {
       setIsProcessing(false);
+      onClose();
     }
   };
 
@@ -208,7 +209,7 @@ export const TelcoPaymentDialog = ({
           <DialogHeader className="space-y-2">
             <DialogTitle className="text-2xl font-bold flex items-center gap-2">
               <CreditCard className="h-5 w-5 text-primary" />
-              Confirm Purchase
+              Payment
             </DialogTitle>
             <DialogDescription>Please select a payment method to complete your telco purchase.</DialogDescription>
           </DialogHeader>
@@ -314,11 +315,6 @@ export const TelcoPaymentDialog = ({
                   <span className="text-primary">₱{totalAmount.toFixed(2)}</span>
                 )}
               </div>
-
-              <div className="mt-3 text-sm text-amber-600 bg-amber-50 p-2 rounded-md flex items-center gap-2">
-                <Info className="h-4 w-4" />
-                <span>Only ₱{isLoading ? "..." : serviceAmount.toFixed(2)} will be deducted from your selected payment method</span>
-              </div>
             </div>
 
             {/* Payment Method Selection */}
@@ -338,7 +334,7 @@ export const TelcoPaymentDialog = ({
                         ) : (
                           <>
                             <span>Available: ₱{userCredit.toFixed(2)}</span>
-                            {userCredit < serviceAmount && (
+                            {userCredit < totalAmount && (
                               <Badge variant="outline" className="bg-red-50 text-red-600 ml-1">Insufficient</Badge>
                             )}
                           </>
@@ -376,7 +372,7 @@ export const TelcoPaymentDialog = ({
               {isProcessing ? (
                 <>
                   <Loader className="mr-2 h-4 w-4 animate-spin" />
-                  Processing...
+                  Processing Payment...
                 </>
               ) : isLoading ? (
                 <>
@@ -384,7 +380,7 @@ export const TelcoPaymentDialog = ({
                   Loading...
                 </>
               ) : (
-                "Confirm Purchase"
+                "Pay Now"
               )}
             </Button>
           </DialogFooter>

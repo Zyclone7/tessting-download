@@ -44,9 +44,6 @@ import { toast } from "@/hooks/use-toast";
 import { useUserContext } from "@/hooks/use-user";
 import { useCallback } from "react";
 
-
-
-
 // Define TypeScript interfaces
 interface TelcoProvider {
   id: string;
@@ -85,7 +82,6 @@ interface TransactionFailureResult {
   rrn: string;
   token: string;
   balance: string;
-
 }
 
 type TransactionResult = TransactionSuccessResult | TransactionFailureResult;
@@ -105,11 +101,10 @@ const TelcoInterface: React.FC = () => {
   const [requestId, setRequestId] = useState<string>("");
   const [paymentDialogOpen, setPaymentDialogOpen] = useState<boolean>(false);
   const [currentBookingDetails, setCurrentBookingDetails] = useState<any>(null);
-  const [userCredit, setUserCredit] = useState<number>(0); // Initialize with 0 instead of 1000
+  const [userCredit, setUserCredit] = useState<number>(0);
   const [creditsLoading, setCreditsLoading] = useState<boolean>(true);
   const { user } = useUserContext();
 
-  
   const fetchUserCredit = useCallback(async () => {
     if (!user?.id) {
       setCreditsLoading(false);
@@ -147,8 +142,6 @@ const TelcoInterface: React.FC = () => {
     fetchUserCredit();
   }, [fetchUserCredit]);
 
-
-  
   // Use the Recharge360 API hook
   const { loading, error, result, balance, dispense, inquire, getBalance } = useRecharge360();
 
@@ -338,19 +331,48 @@ const TelcoInterface: React.FC = () => {
     }
   };
 
-  const handlePurchaseConfirmation = async (): Promise<void> => {
+  // Modified to handle the new flow - proceed to payment dialog
+  const handleProceedToPayment = (): void => {
     if (!selectedPromo || !phoneNumber) return;
     
+    // Set booking details for payment dialog
+    setCurrentBookingDetails({
+      typeOfVoucher: "TELCO",
+      product_code: selectedPromo.productCode,
+      productName: selectedPromo.name,
+      email: "", // You may want to collect this or get from user profile
+      phoneNumber: phoneNumber,
+      quantity: 1,
+      serviceFee: 5, // Set your service fee here
+      pricing: {
+        basePrice: selectedPromo.price,
+        productPrice: selectedPromo.price,
+        subtotal: selectedPromo.price,
+        total: selectedPromo.price + 5, // Add service fee
+        discountPercentage: 0,
+        userRole: "",
+      },
+      telcoProvider: currentTelco?.name,
+    });
+    
+    // Close confirmation dialog and open payment dialog
+    setConfirmationDialog(false);
+    setPaymentDialogOpen(true);
+  };
+
+  // Executed after payment is successful
+  const handlePaymentSuccess = async (paymentMethod: string, proofOfPaymentUrl?: string) => {
     setProcessingTransaction(true);
+    setPaymentDialogOpen(false);
     
     try {
       // Format phone number for API call
       const formattedPhoneNumber = formatPhoneNumberWithPrefix(phoneNumber);
       
       // Call the Recharge360 API to dispense the product
-      const result = await dispense(selectedPromo.productCode, formattedPhoneNumber);
+      const result = await dispense(selectedPromo!.productCode, formattedPhoneNumber);
       
-      // Using literal true for discriminated union
+      // Set the transaction result
       setTransactionResult({
         success: true as const,
         rrn: result.rrn,
@@ -358,13 +380,22 @@ const TelcoInterface: React.FC = () => {
         balance: result.balance
       });
       
-      // Store requestId for later inquiry if needed
+      // Store requestId for later inquiry
       setRequestId(result.requestId || "");
+      
+      // If using credits, refresh user credit balance
+      if (paymentMethod === "credits") {
+        await fetchUserCredit();
+      }
+      
+      toast({
+        title: "Purchase Successful",
+        description: `Your ${selectedPromo!.name} load has been processed successfully.`,
+      });
       
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Transaction failed";
       
-      // Using literal false for discriminated union
       setTransactionResult({
         success: false as const,
         message: errorMessage,
@@ -373,9 +404,14 @@ const TelcoInterface: React.FC = () => {
         token: "",
         balance: "0.00"
       });
+      
+      toast({
+        title: "Transaction Failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
     } finally {
       setProcessingTransaction(false);
-      setConfirmationDialog(false);
       setShowResultDialog(true);
     }
   };
@@ -441,89 +477,16 @@ const TelcoInterface: React.FC = () => {
     }
   };
 
-   // Add this new method to handle payment confirmation
-   const handlePaymentConfirmation = (): void => {
-    if (!selectedPromo || !phoneNumber) return;
-    
-    // Set booking details for payment dialog
-    setCurrentBookingDetails({
-      typeOfVoucher: "TELCO",
-      product_code: selectedPromo.productCode,
-      productName: selectedPromo.name,
-      email: "", // You may want to collect this or get from user profile
-      phoneNumber: phoneNumber,
-      quantity: 1,
-      serviceFee: 5, // Set your service fee here
-      pricing: {
-        basePrice: selectedPromo.price,
-        productPrice: selectedPromo.price,
-        subtotal: selectedPromo.price,
-        total: selectedPromo.price + 5, // Add service fee
-        discountPercentage: 0,
-        userRole: "",
-      },
-      telcoProvider: currentTelco?.name,
-    });
-    
-    // Close confirmation dialog and open payment dialog
-    setConfirmationDialog(false);
-    setPaymentDialogOpen(true);
-  };
-  
-  // Add a payment success handler
-  const handlePaymentSuccess = async (paymentMethod: string, proofOfPaymentUrl?: string) => {
-    setProcessingTransaction(true);
-    
-    try {
-      // Format phone number for API call
-      const formattedPhoneNumber = formatPhoneNumberWithPrefix(phoneNumber);
-      
-      // Call the Recharge360 API to dispense the product
-      const result = await dispense(selectedPromo!.productCode, formattedPhoneNumber);
-      
-      // Set the transaction result
-      setTransactionResult({
-        success: true as const,
-        rrn: result.rrn,
-        token: result.token,
-        balance: result.balance
-      });
-      
-      // Store requestId for later inquiry
-      setRequestId(result.requestId || "");
-      
-      // If using credits, refresh user credit balance
-      if (paymentMethod === "credits") {
-        await fetchUserCredit();
-      }
-      
-      toast({
-        title: "Purchase Successful",
-        description: `Your ${selectedPromo!.name} load has been processed successfully.`,
-      });
-      
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Transaction failed";
-      
-      setTransactionResult({
-        success: false as const,
-        message: errorMessage,
-        code: "Error",
-        rrn: "",
-        token: "",
-        balance: "0.00"
-      });
-      
-      toast({
-        title: "Transaction Failed",
-        description: errorMessage,
-        variant: "destructive",
-      });
-    } finally {
-      setProcessingTransaction(false);
-      setPaymentDialogOpen(false);
-      setShowResultDialog(true);
-    }
+  // Function to reset and close dialogs to start over
+  const handleReset = (): void => {
+    setShowResultDialog(false);
+    setSelectedPromo(null);
+    setPhoneNumber("");
+    setAmount("");
+    setSelectedTelco("");
+    setCurrentTelco(null);
+    setTransactionResult(null);
+    setRequestId("");
   };
 
   return (
@@ -808,11 +771,10 @@ const TelcoInterface: React.FC = () => {
               <Alert className="border-blue-500 bg-blue-50">
                 <Info className="h-4 w-4 text-blue-500" />
                 <AlertTitle className="text-blue-800">
-                  Payment Notice
+                  Purchase Notice
                 </AlertTitle>
                 <AlertDescription className="text-blue-700">
-                  This amount will be charged to your Recharge360 wallet balance.
-                  Current balance: ₱{balance || "Loading..."}
+                  Clicking proceed will take you to the payment screen. After payment is successfully processed, your e-load will be dispensed.
                 </AlertDescription>
               </Alert>
             </div>
@@ -830,21 +792,24 @@ const TelcoInterface: React.FC = () => {
               </Button>
               <Button 
                 type="submit" 
-                onClick={handlePurchaseConfirmation}
-                disabled={processingTransaction}
+                onClick={handleProceedToPayment}
               >
-                {processingTransaction ? (
-                  <>
-                    <Loader className="h-4 w-4 mr-2 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  "Confirm Purchase"
-                )}
+                Proceed to Payment
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Payment Dialog */}
+        {paymentDialogOpen && currentBookingDetails && (
+          <TelcoPaymentDialog
+            open={paymentDialogOpen}
+            onClose={() => setPaymentDialogOpen(false)}
+            bookingDetails={currentBookingDetails}
+            onBookingSuccess={handlePaymentSuccess}
+            userCredit={userCredit}
+          />
+        )}
 
         {/* Transaction Result Dialog */}
         <Dialog open={showResultDialog} onOpenChange={setShowResultDialog}>
@@ -933,31 +898,20 @@ const TelcoInterface: React.FC = () => {
               )}
             </div>
 
-            {paymentDialogOpen && currentBookingDetails && (
-        <TelcoPaymentDialog
-          open={paymentDialogOpen}
-          onClose={() => setPaymentDialogOpen(false)}
-          bookingDetails={currentBookingDetails}
-          onBookingSuccess={handlePaymentSuccess}
-          userCredit={userCredit}
-        />
-      )}
-
             <DialogFooter>
-            <Button 
-        type="submit" 
-        onClick={handlePaymentConfirmation} // Change to the new method
-        disabled={processingTransaction}
-      >
-        {processingTransaction ? (
-          <>
-            <Loader className="h-4 w-4 mr-2 animate-spin" />
-            Processing...
-          </>
-        ) : (
-          "Proceed to Payment" // Update button text
-        )}
-      </Button>
+              <Button 
+                type="button" 
+                onClick={handleReset}
+              >
+                New Purchase
+              </Button>
+              <Button 
+                type="button" 
+                variant="outline" 
+                onClick={() => setShowResultDialog(false)}
+              >
+                Close
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   CardContent,
   CardDescription,
@@ -17,6 +17,10 @@ import {
   Zap,
   Wifi,
   Calendar,
+  RefreshCw,
+  CheckCircle,
+  XCircle,
+  Loader,
 } from "lucide-react";
 import {
   Dialog,
@@ -28,12 +32,27 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { 
+  useRecharge360, 
+  TestProducts,
+  type DispenseResponse,
+  type InquireResponse 
+} from "@/lib/recharge360/recharge360-api";
+import { TelcoPaymentDialog } from "./telco-payment-dialog";
+import { getUserProfile } from "@/actions/user";
+import { toast } from "@/hooks/use-toast";
+import { useUserContext } from "@/hooks/use-user";
+import { useCallback } from "react";
+
+
+
 
 // Define TypeScript interfaces
 interface TelcoProvider {
   id: string;
   name: string;
   logo: string;
+  productCode: string;
   useIcon?: boolean;
 }
 
@@ -45,7 +64,31 @@ interface Promo {
   validity: string;
   type: string;
   icon: React.ReactNode;
+  productCode: string;
 }
+
+interface TransactionSuccessResult {
+  success: true;
+  rrn: string;
+  token: string;
+  balance: string;
+  status?: string;
+}
+
+interface TransactionFailureResult {
+  success: false;
+  message: string;
+  code: string;
+  status?: string;
+  errorCode?: string;
+  errorMessage?: string;
+  rrn: string;
+  token: string;
+  balance: string;
+
+}
+
+type TransactionResult = TransactionSuccessResult | TransactionFailureResult;
 
 const TelcoInterface: React.FC = () => {
   const [selectedTelco, setSelectedTelco] = useState<string>("");
@@ -56,24 +99,72 @@ const TelcoInterface: React.FC = () => {
   const [selectedPromo, setSelectedPromo] = useState<Promo | null>(null);
   const [confirmationDialog, setConfirmationDialog] = useState<boolean>(false);
   const [currentTelco, setCurrentTelco] = useState<TelcoProvider | null>(null);
+  const [processingTransaction, setProcessingTransaction] = useState<boolean>(false);
+  const [transactionResult, setTransactionResult] = useState<TransactionResult | null>(null);
+  const [showResultDialog, setShowResultDialog] = useState<boolean>(false);
+  const [requestId, setRequestId] = useState<string>("");
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState<boolean>(false);
+  const [currentBookingDetails, setCurrentBookingDetails] = useState<any>(null);
+  const [userCredit, setUserCredit] = useState<number>(0); // Initialize with 0 instead of 1000
+  const [creditsLoading, setCreditsLoading] = useState<boolean>(true);
+  const { user } = useUserContext();
 
-  // Telco providers data
+  
+  const fetchUserCredit = useCallback(async () => {
+    if (!user?.id) {
+      setCreditsLoading(false);
+      return;
+    }
+
+    setCreditsLoading(true);
+    try {
+      // Use the actual API call
+      const response = await getUserProfile(user.id.toString());
+      
+      if (response.success) {
+        setUserCredit(response.data?.user_credits || 0);
+      } else {
+        toast({
+          title: "Error",
+          description: response.message || "Failed to fetch user credit.",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching user credit:", error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch user credit. Please try again later.",
+        variant: "destructive",
+      });
+    } finally {
+      setCreditsLoading(false);
+    }
+  }, [user]);
+
+  // Update the useEffect to use the callback with its dependency
+  useEffect(() => {
+    fetchUserCredit();
+  }, [fetchUserCredit]);
+
+
+  
+  // Use the Recharge360 API hook
+  const { loading, error, result, balance, dispense, inquire, getBalance } = useRecharge360();
+
+  // Telco providers data - reduced to just 2 providers with product codes
   const telcoProviders: TelcoProvider[] = [
-    { id: "globe", name: "Globe", logo: "/images/load/globe.png" },
-    { id: "tm", name: "TM", logo: "/images/load/tm.png" },
-    { id: "gomo", name: "GOMO", logo: "/images/load/gomo.png" },
-    { id: "smart", name: "Smart", logo: "/images/load/smart.png" },
-    { id: "tnt", name: "TNT", logo: "/images/load/TNT.png" },
-    { id: "dito", name: "DITO", logo: "/images/load/dito.png" },
-    { id: "esim", name: "eSIM", logo: "", useIcon: true },
-    { id: "roaming", name: "Roaming", logo: "", useIcon: true },
+    { id: "globe", name: "Globe", logo: "/images/load/globe.png", productCode: "TELCO" },
+    { id: "smart", name: "Smart", logo: "/images/load/smart.png", productCode: "PIN" }
   ];
 
   // Preset load amounts
-  const loadAmounts: number[] = [50, 100, 200, 300, 500, 1000];
+  const loadAmounts: number[] = [10, 20, 50, 100, 200, 300, 500, 1000];
 
   // Promo data based on telco selected
   const getPromos = (telcoId: string): Promo[] => {
+    const productCode = telcoProviders.find(provider => provider.id === telcoId)?.productCode || "";
+    
     switch (telcoId) {
       case "globe":
         return [
@@ -85,6 +176,7 @@ const TelcoInterface: React.FC = () => {
             validity: "7 days",
             type: "data",
             icon: <Wifi className="h-5 w-5 text-blue-500" />,
+            productCode,
           },
           {
             id: "goplus129",
@@ -95,6 +187,7 @@ const TelcoInterface: React.FC = () => {
             validity: "7 days",
             type: "combo",
             icon: <Zap className="h-5 w-5 text-green-500" />,
+            productCode,
           },
           {
             id: "go50",
@@ -104,6 +197,7 @@ const TelcoInterface: React.FC = () => {
             validity: "3 days",
             type: "call",
             icon: <Phone className="h-5 w-5 text-purple-500" />,
+            productCode,
           },
           {
             id: "goplus599",
@@ -114,6 +208,7 @@ const TelcoInterface: React.FC = () => {
             validity: "30 days",
             type: "combo",
             icon: <Calendar className="h-5 w-5 text-orange-500" />,
+            productCode,
           },
         ];
       case "smart":
@@ -126,6 +221,7 @@ const TelcoInterface: React.FC = () => {
             validity: "7 days",
             type: "data",
             icon: <Wifi className="h-5 w-5 text-blue-500" />,
+            productCode,
           },
           {
             id: "giga149",
@@ -136,6 +232,7 @@ const TelcoInterface: React.FC = () => {
             validity: "7 days",
             type: "combo",
             icon: <Zap className="h-5 w-5 text-green-500" />,
+            productCode,
           },
         ];
       default:
@@ -148,6 +245,7 @@ const TelcoInterface: React.FC = () => {
             validity: "7 days",
             type: "data",
             icon: <Wifi className="h-5 w-5 text-blue-500" />,
+            productCode,
           },
           {
             id: "combo149",
@@ -157,6 +255,7 @@ const TelcoInterface: React.FC = () => {
             validity: "7 days",
             type: "combo",
             icon: <Zap className="h-5 w-5 text-green-500" />,
+            productCode,
           },
         ];
     }
@@ -192,9 +291,19 @@ const TelcoInterface: React.FC = () => {
     return cleaned;
   };
 
+  const formatPhoneNumberWithPrefix = (number: string): string => {
+    // Format for API call (09XXXXXXXXX)
+    const cleaned = number.replace(/\D/g, "");
+    return cleaned.length === 10 ? `0${cleaned}` : cleaned;
+  };
+
   const handleRegularLoadSelect = (amt: number): void => {
     setAmount(amt.toString());
     setShowPromoDialog(false);
+    
+    // Get the product code from the selected telco
+    const productCode = currentTelco?.productCode || "";
+    
     setSelectedPromo({
       id: "regular",
       name: "Regular Load",
@@ -203,6 +312,7 @@ const TelcoInterface: React.FC = () => {
       validity: "No expiry",
       type: "regular",
       icon: <Phone className="h-5 w-5 text-gray-500" />,
+      productCode,
     });
     setConfirmationDialog(true);
   };
@@ -210,6 +320,10 @@ const TelcoInterface: React.FC = () => {
   const handleCustomAmountSubmit = (): void => {
     if (amount && parseFloat(amount) >= 10) {
       setShowPromoDialog(false);
+      
+      // Get the product code from the selected telco
+      const productCode = currentTelco?.productCode || "";
+      
       setSelectedPromo({
         id: "custom",
         name: "Custom Load",
@@ -218,16 +332,52 @@ const TelcoInterface: React.FC = () => {
         validity: "No expiry",
         type: "regular",
         icon: <Phone className="h-5 w-5 text-gray-500" />,
+        productCode,
       });
       setConfirmationDialog(true);
     }
   };
 
-  const handlePurchaseConfirmation = (): void => {
-    // This would handle the payment processing in a real app
-    setConfirmationDialog(false);
-    // Show success message or redirect
-    alert("Your load purchase was successful!");
+  const handlePurchaseConfirmation = async (): Promise<void> => {
+    if (!selectedPromo || !phoneNumber) return;
+    
+    setProcessingTransaction(true);
+    
+    try {
+      // Format phone number for API call
+      const formattedPhoneNumber = formatPhoneNumberWithPrefix(phoneNumber);
+      
+      // Call the Recharge360 API to dispense the product
+      const result = await dispense(selectedPromo.productCode, formattedPhoneNumber);
+      
+      // Using literal true for discriminated union
+      setTransactionResult({
+        success: true as const,
+        rrn: result.rrn,
+        token: result.token,
+        balance: result.balance
+      });
+      
+      // Store requestId for later inquiry if needed
+      setRequestId(result.requestId || "");
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Transaction failed";
+      
+      // Using literal false for discriminated union
+      setTransactionResult({
+        success: false as const,
+        message: errorMessage,
+        code: "Error",
+        rrn: "",
+        token: "",
+        balance: "0.00"
+      });
+    } finally {
+      setProcessingTransaction(false);
+      setConfirmationDialog(false);
+      setShowResultDialog(true);
+    }
   };
 
   const handleTelcoSelect = (provider: TelcoProvider): void => {
@@ -236,14 +386,163 @@ const TelcoInterface: React.FC = () => {
     setOpenLoadDialog(true);
   };
 
+  const handleCheckTransaction = async (): Promise<void> => {
+    if (!requestId) return;
+    
+    setProcessingTransaction(true);
+    
+    try {
+      const result = await inquire(requestId);
+      
+      // Create the correct type of result based on the transaction status
+      if (result.status === "SUCCESS") {
+        setTransactionResult({
+          success: true as const,
+          rrn: result.rrn,
+          token: result.token || "",
+          status: result.status,
+          balance: result.balance
+        });
+      } else {
+        setTransactionResult({
+          success: false as const,
+          rrn: result.rrn,
+          token: result.token || "",
+          status: result.status,
+          errorCode: result.errorCode,
+          errorMessage: result.errorMessage,
+          code: result.errorCode || "Error",
+          message: result.errorMessage || "Transaction failed",
+          balance: result.balance
+        });
+      }
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Failed to check transaction";
+      
+      setTransactionResult({
+        success: false as const,
+        message: errorMessage,
+        code: "Error",
+        rrn: "",
+        token: "",
+        balance: "0.00"
+      });
+    } finally {
+      setProcessingTransaction(false);
+    }
+  };
+
+  const handleRefreshBalance = async (): Promise<void> => {
+    try {
+      await getBalance();
+    } catch (error) {
+      console.error("Failed to refresh balance:", error);
+    }
+  };
+
+   // Add this new method to handle payment confirmation
+   const handlePaymentConfirmation = (): void => {
+    if (!selectedPromo || !phoneNumber) return;
+    
+    // Set booking details for payment dialog
+    setCurrentBookingDetails({
+      typeOfVoucher: "TELCO",
+      product_code: selectedPromo.productCode,
+      productName: selectedPromo.name,
+      email: "", // You may want to collect this or get from user profile
+      phoneNumber: phoneNumber,
+      quantity: 1,
+      serviceFee: 5, // Set your service fee here
+      pricing: {
+        basePrice: selectedPromo.price,
+        productPrice: selectedPromo.price,
+        subtotal: selectedPromo.price,
+        total: selectedPromo.price + 5, // Add service fee
+        discountPercentage: 0,
+        userRole: "",
+      },
+      telcoProvider: currentTelco?.name,
+    });
+    
+    // Close confirmation dialog and open payment dialog
+    setConfirmationDialog(false);
+    setPaymentDialogOpen(true);
+  };
+  
+  // Add a payment success handler
+  const handlePaymentSuccess = async (paymentMethod: string, proofOfPaymentUrl?: string) => {
+    setProcessingTransaction(true);
+    
+    try {
+      // Format phone number for API call
+      const formattedPhoneNumber = formatPhoneNumberWithPrefix(phoneNumber);
+      
+      // Call the Recharge360 API to dispense the product
+      const result = await dispense(selectedPromo!.productCode, formattedPhoneNumber);
+      
+      // Set the transaction result
+      setTransactionResult({
+        success: true as const,
+        rrn: result.rrn,
+        token: result.token,
+        balance: result.balance
+      });
+      
+      // Store requestId for later inquiry
+      setRequestId(result.requestId || "");
+      
+      // If using credits, refresh user credit balance
+      if (paymentMethod === "credits") {
+        await fetchUserCredit();
+      }
+      
+      toast({
+        title: "Purchase Successful",
+        description: `Your ${selectedPromo!.name} load has been processed successfully.`,
+      });
+      
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Transaction failed";
+      
+      setTransactionResult({
+        success: false as const,
+        message: errorMessage,
+        code: "Error",
+        rrn: "",
+        token: "",
+        balance: "0.00"
+      });
+      
+      toast({
+        title: "Transaction Failed",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setProcessingTransaction(false);
+      setPaymentDialogOpen(false);
+      setShowResultDialog(true);
+    }
+  };
+
   return (
     <div>
       <Alert className="mb-6 border-orange-500 bg-orange-50">
         <Info className="h-4 w-4 text-orange-500" />
         <AlertTitle className="text-orange-800">Development Notice</AlertTitle>
         <AlertDescription className="text-orange-700">
-          The Telco E-load feature is currently under development. This
-          interface is a preview of upcoming functionality.
+          The Telco E-load feature is connected to Recharge360 API. Current balance: ₱{balance || "Loading..."}
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="ml-2"
+            onClick={handleRefreshBalance}
+            disabled={loading}
+          >
+            <RefreshCw className="h-4 w-4 mr-1" />
+            Refresh
+          </Button>
         </AlertDescription>
       </Alert>
 
@@ -290,6 +589,9 @@ const TelcoInterface: React.FC = () => {
                 )}
               </div>
               <span className="text-lg font-medium">{provider.name}</span>
+              <span className="ml-auto text-xs text-gray-500">
+                Product: {provider.productCode}
+              </span>
             </div>
           ))}
         </div>
@@ -495,6 +797,11 @@ const TelcoInterface: React.FC = () => {
                   <div className="font-medium text-green-600">
                     ₱{selectedPromo?.price.toFixed(2)}
                   </div>
+                  
+                  <div className="text-gray-600">Product Code:</div>
+                  <div className="font-medium">
+                    {selectedPromo?.productCode}
+                  </div>
                 </div>
               </div>
 
@@ -504,7 +811,8 @@ const TelcoInterface: React.FC = () => {
                   Payment Notice
                 </AlertTitle>
                 <AlertDescription className="text-blue-700">
-                  This amount will be charged to your connected payment method.
+                  This amount will be charged to your Recharge360 wallet balance.
+                  Current balance: ₱{balance || "Loading..."}
                 </AlertDescription>
               </Alert>
             </div>
@@ -520,9 +828,136 @@ const TelcoInterface: React.FC = () => {
               >
                 Back
               </Button>
-              <Button type="submit" onClick={handlePurchaseConfirmation}>
-                Confirm Purchase
+              <Button 
+                type="submit" 
+                onClick={handlePurchaseConfirmation}
+                disabled={processingTransaction}
+              >
+                {processingTransaction ? (
+                  <>
+                    <Loader className="h-4 w-4 mr-2 animate-spin" />
+                    Processing...
+                  </>
+                ) : (
+                  "Confirm Purchase"
+                )}
               </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Transaction Result Dialog */}
+        <Dialog open={showResultDialog} onOpenChange={setShowResultDialog}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>
+                {transactionResult?.success ? "Transaction Successful" : "Transaction Failed"}
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              {transactionResult?.success ? (
+                <div className="text-center mb-4">
+                  <CheckCircle className="h-16 w-16 text-green-500 mx-auto mb-2" />
+                </div>
+              ) : (
+                <div className="text-center mb-4">
+                  <XCircle className="h-16 w-16 text-red-500 mx-auto mb-2" />
+                </div>
+              )}
+
+              <div className="border rounded-lg p-4 bg-gray-50">
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  {transactionResult?.success ? (
+                    <>
+                      <div className="text-gray-600">Reference Number:</div>
+                      <div className="font-medium">{transactionResult.rrn}</div>
+
+                      <div className="text-gray-600">Token/PIN:</div>
+                      <div className="font-medium break-all">{transactionResult.token}</div>
+
+                      <div className="text-gray-600">Recipient:</div>
+                      <div className="font-medium">+63 {formatPhoneNumber(phoneNumber)}</div>
+
+                      <div className="text-gray-600">Wallet Balance:</div>
+                      <div className="font-medium">₱{transactionResult.balance}</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-gray-600">Error Code:</div>
+                      <div className="font-medium">{transactionResult?.code || "N/A"}</div>
+
+                      <div className="text-gray-600">Error Message:</div>
+                      <div className="font-medium">{transactionResult?.message || "No message available"}</div>
+
+                      {transactionResult?.status === "PENDING" && (
+                        <>
+                          <div className="text-gray-600">Status:</div>
+                          <div className="font-medium">Transaction is pending</div>
+                        </>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {requestId && (
+                <Alert className="border-blue-500 bg-blue-50">
+                  <Info className="h-4 w-4 text-blue-500" />
+                  <AlertTitle className="text-blue-800">
+                    Transaction Reference
+                  </AlertTitle>
+                  <AlertDescription className="text-blue-700">
+                    Request ID: {requestId}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="ml-2"
+                      onClick={handleCheckTransaction}
+                      disabled={processingTransaction}
+                    >
+                      {processingTransaction ? (
+                        <>
+                          <Loader className="h-4 w-4 mr-1 animate-spin" />
+                          Checking...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="h-4 w-4 mr-1" />
+                          Check Status
+                        </>
+                      )}
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              )}
+            </div>
+
+            {paymentDialogOpen && currentBookingDetails && (
+        <TelcoPaymentDialog
+          open={paymentDialogOpen}
+          onClose={() => setPaymentDialogOpen(false)}
+          bookingDetails={currentBookingDetails}
+          onBookingSuccess={handlePaymentSuccess}
+          userCredit={userCredit}
+        />
+      )}
+
+            <DialogFooter>
+            <Button 
+        type="submit" 
+        onClick={handlePaymentConfirmation} // Change to the new method
+        disabled={processingTransaction}
+      >
+        {processingTransaction ? (
+          <>
+            <Loader className="h-4 w-4 mr-2 animate-spin" />
+            Processing...
+          </>
+        ) : (
+          "Proceed to Payment" // Update button text
+        )}
+      </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

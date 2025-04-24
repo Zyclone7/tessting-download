@@ -1,3 +1,5 @@
+"use client"
+
 import React, { useState, useEffect } from "react";
 import {
   Dialog,
@@ -12,6 +14,7 @@ import { Loader, Wallet, Check, AlertCircle, Info, Tag, Percent, CreditCard } fr
 import { Separator } from "@/components/ui/separator";
 import { toast } from "@/hooks/use-toast";
 import { getUserProfile } from "@/actions/user";
+import { useUserContext } from "@/hooks/use-user";
 import { Badge } from "@/components/ui/badge";
 import { motion } from "framer-motion";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -109,11 +112,34 @@ export const TelcoPaymentDialog = ({
   const [isProcessing, setIsProcessing] = useState(false);
   const [kycStatus, setKycStatus] = useState<number | null>(null);
   const [userRole, setUserRole] = useState<string>("");
+  const { user } = useUserContext();
   const [isLoading, setIsLoading] = useState(true);
   const [paymentMethod, setPaymentMethod] = useState<string>("credits");
 
-  // Get pricing information from bookingDetails
-  const pricing = bookingDetails?.pricing || {
+  // Apply provider-specific discount
+  const applyProviderDiscount = (provider: string | undefined, originalPrice: number) => {
+    if (!provider) return { price: originalPrice, discountPercentage: 0 };
+    
+    let discountPercentage = 0;
+    
+    // Apply discount based on telco provider
+    if (provider.toLowerCase() === "globe") {
+      discountPercentage = 2;
+    } else if (provider.toLowerCase() === "smart") {
+      discountPercentage = 1;
+    }
+    
+    const discountAmount = originalPrice * (discountPercentage / 100);
+    const discountedPrice = originalPrice - discountAmount;
+    
+    return { 
+      price: discountedPrice,
+      discountPercentage 
+    };
+  };
+
+  // Original pricing from booking details
+  const originalPricing = bookingDetails?.pricing || {
     basePrice: 0,
     productPrice: 0,
     subtotal: 0,
@@ -121,23 +147,34 @@ export const TelcoPaymentDialog = ({
     discountPercentage: 0,
     userRole: "",
   };
-
-  // Calculate amounts based on booking details
+  
+  // Apply telco provider discount if applicable
+  const providerDiscount = applyProviderDiscount(
+    bookingDetails?.telcoProvider,
+    originalPricing.productPrice
+  );
+  
+  // Create updated pricing with provider discount
+  const pricing = {
+    ...originalPricing,
+    productPrice: providerDiscount.price,
+    subtotal: providerDiscount.price * (bookingDetails?.quantity || 1),
+    discountPercentage: originalPricing.discountPercentage + providerDiscount.discountPercentage,
+  };
+  
+  // Calculate the final amounts
   const serviceAmount = pricing.subtotal;
-  const serviceFee = bookingDetails?.serviceFee || 0;
-  const totalAmount = pricing.total;
-  const hasEnoughCredits = userCredit >= totalAmount; // Check against total amount including service fee
+  const [serviceFee, setServiceFee] = useState(bookingDetails?.serviceFee || 0);
+  const totalAmount = serviceAmount + serviceFee;
+  const hasEnoughCredits = userCredit >= totalAmount;
 
   // Fetch user KYC status and role
   useEffect(() => {
     const fetchUserProfile = async () => {
-      if (open) {
+      if (user && user.id) {
         setIsLoading(true);
         try {
-          // In a real app, this would use the user from context
-          // For now, we'll simulate with a hardcoded ID
-          const userId = "12345"; // This would come from user context
-          const response = await getUserProfile(userId);
+          const response = await getUserProfile(user.id.toString());
           if (response.success && response.data) {
             setKycStatus(Number.parseInt(response.data.user_kyc?.toString() || "0"));
             if (response.data.user_role) {
@@ -155,52 +192,74 @@ export const TelcoPaymentDialog = ({
       }
     };
 
-    fetchUserProfile();
-  }, [open]);
+    if (open) {
+      fetchUserProfile();
+      
+      // Initialize service fee from booking details when dialog opens
+      if (bookingDetails?.serviceFee) {
+        setServiceFee(bookingDetails.serviceFee);
+      }
+    }
+  }, [user, open, bookingDetails]);
+
 
   // Use the role from pricing if available, otherwise use the fetched role
   const displayRole = pricing.userRole || userRole;
 
-  const handleSubmit = async () => {
-    setIsProcessing(true);
+// In the TelcoPaymentDialog.tsx file, update the handleSubmit function
 
-    try {
-      if (paymentMethod === "credits" && !hasEnoughCredits) {
-        toast({
-          title: "Insufficient Credits",
-          description: "You don't have enough credits for this purchase.",
-          variant: "destructive",
-        });
-        setIsProcessing(false);
-        return;
-      }
+const handleSubmit = async () => {
+  setIsProcessing(true);
 
-      // Process payment based on selected method
-      onBookingSuccess(paymentMethod);
-      
+  try {
+    if (paymentMethod === "credits" && !hasEnoughCredits) {
       toast({
-        title: "Payment Successful",
-        description: paymentMethod === "credits" 
-          ? `₱${totalAmount.toFixed(2)} has been deducted from your credits.`
-          : `Your ${paymentMethod} payment was processed successfully.`,
-      });
-    } catch (error) {
-      console.error("Payment processing error:", error);
-      toast({
-        title: "Payment Failed",
-        description: "An error occurred while processing your payment.",
+        title: "Insufficient Credits",
+        description: "You don't have enough credits for this purchase.",
         variant: "destructive",
       });
-    } finally {
       setIsProcessing(false);
-      onClose();
+      return;
     }
-  };
+
+    // For the payment dialog, we're just initiating the payment process
+    // The actual credit deduction will happen in the parent component after
+    // a successful API call to the dispense endpoint
+    onBookingSuccess(paymentMethod);
+    
+    // No toast here - we'll show success/failure toast after the API call completes
+  } catch (error) {
+    console.error("Payment processing error:", error);
+    toast({
+      title: "Payment Failed",
+      description: "An error occurred while processing your payment.",
+      variant: "destructive",
+    });
+  } finally {
+    setIsProcessing(false);
+    onClose();
+  }
+};
 
   // Only disable payment if KYC is confirmed to be 0 or credits are insufficient when using credits
   const isPaymentDisabled = 
     (paymentMethod === "credits" && (kycStatus === 0 || !hasEnoughCredits) && !isLoading) ||
     isProcessing;
+
+  // Get provider-specific discount badge text
+  const getProviderDiscountText = () => {
+    if (!bookingDetails?.telcoProvider) return null;
+    
+    const provider = bookingDetails.telcoProvider.toLowerCase();
+    if (provider === "globe") {
+      return "Globe 2% discount";
+    } else if (provider === "smart") {
+      return "Smart 1% discount";
+    }
+    return null;
+  };
+
+  const providerDiscountText = getProviderDiscountText();
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -271,7 +330,7 @@ export const TelcoPaymentDialog = ({
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <span>Base Price:</span>
-                  {isLoading ? <Skeleton className="h-4 w-16" /> : <span>₱{pricing.basePrice.toFixed(2)}</span>}
+                  {isLoading ? <Skeleton className="h-4 w-16" /> : <span>₱{originalPricing.basePrice.toFixed(2)}</span>}
                 </div>
 
                 <div className="flex justify-between items-center">
@@ -294,6 +353,15 @@ export const TelcoPaymentDialog = ({
                   )}
                 </div>
 
+                {/* Provider discount info - only display if applicable */}
+                {!isLoading && providerDiscountText && (
+                  <div className="flex justify-end">
+                    <Badge variant="outline" className="text-xs bg-blue-50 text-blue-600">
+                      {providerDiscountText}
+                    </Badge>
+                  </div>
+                )}
+
                 <div className="flex justify-between items-center">
                   <span>Subtotal ({bookingDetails.quantity} items):</span>
                   {isLoading ? <Skeleton className="h-4 w-16" /> : <span>₱{serviceAmount.toFixed(2)}</span>}
@@ -301,7 +369,17 @@ export const TelcoPaymentDialog = ({
 
                 <div className="flex justify-between items-center">
                   <span>Service Fee:</span>
-                  <span>₱{serviceFee.toFixed(2)}</span>
+                  <div className="flex items-center">
+                    <span className="mr-2">₱</span>
+                    <input
+                      type="number"
+                      value={serviceFee}
+                      onChange={(e) => setServiceFee(Number(e.target.value))}
+                      className="w-16 p-1 text-right border rounded"
+                      min="0"
+                      step="0.01"
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -317,35 +395,42 @@ export const TelcoPaymentDialog = ({
               </div>
             </div>
 
-            {/* Payment Method Selection */}
-            <div className="mb-4 p-4 rounded-md border">
-              <h3 className="font-semibold mb-3">Select Payment Method</h3>
-              
-              <RadioGroup value={paymentMethod} onValueChange={setPaymentMethod} className="space-y-2">
-                <div className="flex items-center space-x-2 border p-3 rounded-md hover:bg-gray-50 cursor-pointer">
-                  <RadioGroupItem value="credits" id="credits" />
-                  <Label htmlFor="credits" className="flex items-center cursor-pointer">
-                    <Wallet className="h-5 w-5 text-primary mr-2" />
-                    <div>
-                      <div className="font-medium">Credit Balance</div>
-                      <div className="text-sm text-muted-foreground flex items-center gap-1">
-                        {isLoading ? (
-                          <Skeleton className="h-4 w-24" />
-                        ) : (
-                          <>
-                            <span>Available: ₱{userCredit.toFixed(2)}</span>
-                            {userCredit < totalAmount && (
-                              <Badge variant="outline" className="bg-red-50 text-red-600 ml-1">Insufficient</Badge>
-                            )}
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </Label>
+            {/* Credit Balance Display - Fixed height to prevent layout shifts */}
+            <div className="mb-4 p-4 rounded-md border bg-card min-h-[80px]">
+              <div className="flex justify-between items-center">
+                <div className="flex items-center gap-2">
+                  <Wallet className="h-5 w-5 text-primary" />
+                  <span className="font-medium">Your Credit Balance:</span>
                 </div>
-              </RadioGroup>
-            </div>
+                {isLoading ? (
+                  <Skeleton className="h-6 w-24" />
+                ) : (
+                  <span
+                    className={`font-bold text-lg ${userCredit < totalAmount ? "text-red-500" : "text-green-500"}`}
+                  >
+                    ₱{userCredit.toFixed(2)}
+                  </span>
+                )}
+              </div>
 
+              {!isLoading && (
+                <>
+                  {userCredit < totalAmount && (
+                    <div className="mt-2 flex items-center gap-2 text-red-500 bg-red-50 p-2 rounded-md">
+                      <AlertCircle className="h-4 w-4" />
+                      <span className="text-sm">Insufficient credits for this purchase</span>
+                    </div>
+                  )}
+
+                  {userCredit >= totalAmount && (
+                    <div className="mt-2 flex items-center gap-2 text-green-500 bg-green-50 p-2 rounded-md">
+                      <Check className="h-4 w-4" />
+                      <span className="text-sm">You have sufficient credits for this purchase</span>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
             {/* KYC Status Display - Only show when loaded and KYC is 0 */}
             {!isLoading && kycStatus === 0 && paymentMethod === "credits" && (
               <div className="mb-4 p-4 rounded-md border bg-red-50 min-h-[80px]">

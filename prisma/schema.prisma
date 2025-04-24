@@ -1255,24 +1255,35 @@ model pt_package_features {
 }
 
 model pt_package_products {
-  id                    BigInt                  @id @unique(map: "id") @default(autoincrement()) @db.UnsignedBigInt
-  name                  String?                 @db.VarChar(255)
-  label                 String?                 @db.VarChar(255)
-  short_description     String?                 @db.Text
-  payment_type          String?                 @db.VarChar(50)
-  price                 Decimal?                @db.Decimal(10, 2)
-  status                Int?
-  the_order             Int?
-  created_at            DateTime?               @db.Timestamp(0)
-  category              String?                 @db.VarChar(255)
-  image                 String?                 @db.VarChar(255)
-  package_type          String?                 @db.VarChar(255)
-  earn_description      String?                 @db.Text
-  refer_earn            Boolean?
-  retailer_count        Int?
-  free_credits          Int?
-  pt_incentive_programs pt_incentive_programs[]
-  pt_package_features   pt_package_features[]
+  id                                                                                         BigInt                      @id @unique(map: "id") @default(autoincrement()) @db.UnsignedBigInt
+  name                                                                                       String?                     @db.VarChar(255)
+  label                                                                                      String?                     @db.VarChar(255)
+  short_description                                                                          String?                     @db.Text
+  payment_type                                                                               String?                     @db.VarChar(50)
+  price                                                                                      Decimal?                    @db.Decimal(10, 2)
+  status                                                                                     Int?
+  the_order                                                                                  Int?
+  created_at                                                                                 DateTime?                   @db.Timestamp(0)
+  category                                                                                   String?                     @db.VarChar(255)
+  image                                                                                      String?                     @db.VarChar(255)
+  package_type                                                                               String?                     @db.VarChar(255)
+  earn_description                                                                           String?                     @db.Text
+  refer_earn                                                                                 Boolean?
+  retailer_count                                                                             Int?
+  free_credits                                                                               Int?
+  product_id                                                                                 BigInt?                     @db.UnsignedBigInt
+  parent_package_id                                                                          BigInt?                     @db.UnsignedBigInt
+  pt_incentive_programs                                                                      pt_incentive_programs[]
+  pt_package_features                                                                        pt_package_features[]
+  pt_package_product_counts_pt_package_product_counts_parent_package_idTopt_package_products pt_package_product_counts[] @relation("pt_package_product_counts_parent_package_idTopt_package_products")
+  pt_package_product_counts_pt_package_product_counts_product_idTopt_package_products        pt_package_product_counts[] @relation("pt_package_product_counts_product_idTopt_package_products")
+  pt_package_products_pt_package_products_parent_package_idTopt_package_products             pt_package_products?        @relation("pt_package_products_parent_package_idTopt_package_products", fields: [parent_package_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_parent_package")
+  other_pt_package_products_pt_package_products_parent_package_idTopt_package_products       pt_package_products[]       @relation("pt_package_products_parent_package_idTopt_package_products")
+  pt_package_products_pt_package_products_product_idTopt_package_products                    pt_package_products?        @relation("pt_package_products_product_idTopt_package_products", fields: [product_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_product")
+  other_pt_package_products_pt_package_products_product_idTopt_package_products              pt_package_products[]       @relation("pt_package_products_product_idTopt_package_products")
+
+  @@index([parent_package_id], map: "fk_parent_package")
+  @@index([product_id], map: "fk_product")
 }
 
 model pt_xpresstravel {
@@ -2012,6 +2023,71 @@ model pt_atmgo_documents {
 
   @@index([application_id], map: "application_id_index")
   @@index([document_type], map: "document_type_index")
+  @@index([status], map: "status_index")
+  @@index([user_id], map: "user_id_index")
+}
+
+model pt_activity_logs {
+  id            Int       @id @default(autoincrement())
+  activity_type String    @db.VarChar(50)
+  table_name    String?   @db.VarChar(100)
+  affected_id   Json?
+  user_id       String?   @db.VarChar(255)
+  timestamp     DateTime? @default(now()) @db.DateTime(0)
+  details       Json?
+  request_info  Json?
+}
+
+model pt_package_product_counts {
+  id                                                                                   BigInt               @id @default(autoincrement()) @db.UnsignedBigInt
+  parent_package_id                                                                    BigInt?              @db.UnsignedBigInt
+  product_id                                                                           BigInt?              @db.UnsignedBigInt
+  count                                                                                Int?                 @db.UnsignedInt
+  pt_package_products_pt_package_product_counts_parent_package_idTopt_package_products pt_package_products? @relation("pt_package_product_counts_parent_package_idTopt_package_products", fields: [parent_package_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "pt_package_product_counts_ibfk_1")
+  pt_package_products_pt_package_product_counts_product_idTopt_package_products        pt_package_products? @relation("pt_package_product_counts_product_idTopt_package_products", fields: [product_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "pt_package_product_counts_ibfk_2")
+
+  @@unique([parent_package_id, product_id], map: "parent_package_id")
+  @@index([product_id], map: "product_id")
+}
+
+model pt_product_passive_income_history {
+  ID                Int       @id @default(autoincrement())
+  product_id        Int
+  sender_user_id    Int
+  recipient_user_id Int
+  income_amount     Float     @default(0) @db.Float
+  level             Int
+  product_type      String?   @db.VarChar(255)
+  created_at        DateTime? @default(now()) @db.DateTime(0)
+}
+
+model pt_telco_transaction {
+  id                Int      @id @default(autoincrement())
+  request_id        String   @unique(map: "request_id_unique") @db.VarChar(255)
+  product_code      String   @db.VarChar(50)
+  recipient         String   @db.VarChar(20)
+  amount            Decimal  @db.Decimal(10, 2)
+  provider_name     String   @db.VarChar(50)
+  promo_name        String?  @db.VarChar(100)
+  promo_description String?  @db.Text
+  validity          String?  @db.VarChar(50)
+  payment_method    String   @db.VarChar(20)
+  service_fee       Decimal  @default(5.00) @db.Decimal(10, 2)
+  provider_discount Decimal  @default(0.00) @db.Decimal(10, 2)
+  subtotal          Decimal  @db.Decimal(10, 2)
+  total             Decimal  @db.Decimal(10, 2)
+  status            String   @default("PENDING") @db.VarChar(20)
+  response_rrn      String?  @db.VarChar(100)
+  response_token    String?  @db.VarChar(255)
+  response_balance  String?  @db.VarChar(100)
+  error_code        String?  @db.VarChar(50)
+  error_message     String?  @db.Text
+  user_id           Int
+  created_at        DateTime @default(now()) @db.Timestamp(0)
+  updated_at        DateTime @default(now()) @db.Timestamp(0)
+
+  @@index([created_at], map: "created_at_index")
+  @@index([recipient], map: "recipient_index")
   @@index([status], map: "status_index")
   @@index([user_id], map: "user_id_index")
 }

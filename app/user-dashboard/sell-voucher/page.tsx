@@ -51,6 +51,7 @@ import { formatNumber, formatUserRole } from "@/lib/utils"
 // Import the TV pricing server action at the top of the file
 import { getTVProductPricing, getAllTVProducts } from "@/actions/tv-pricing"
 import { getAllGSATProducts } from "@/actions/gsat"
+import TelcoTransactionsTable from "@/components/table/telco-transaction-table"
 
 // Type definitions
 interface User {
@@ -2128,7 +2129,8 @@ const SellVoucher: React.FC = () => {
                     <DialogContent className="w-full max-w-4xl">
                       <DialogTitle>Telco Transaction History</DialogTitle>
                       <div className="py-10 text-center">
-                        <p>No transactions available.</p>
+                        <TelcoTransactionsTable/>
+                        
                       </div>
                     </DialogContent>
                   </Dialog>

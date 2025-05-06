@@ -3,7 +3,10 @@ import https from 'https';
 
 // Recharge360 API configuration using environment variables
 const API_CONFIG = {
-  url: process.env.NEXT_PUBLIC_RECHARGE360_BASE_URL || 'https://3.1.236.143/',
+  // Use the API proxy in production (Vercel), direct connection in development
+  url: process.env.NEXT_PUBLIC_VERCEL_URL 
+    ? `/api/proxy` 
+    : process.env.NEXT_PUBLIC_RECHARGE360_BASE_URL || '',
   userId: process.env.RECHARGE360_USER_ID,
   name: process.env.RECHARGE360_NAME,
   secretKey: process.env.RECHARGE360_SECRET_KEY,
@@ -61,16 +64,49 @@ export type ErrorResponse = {
 };
 
 // Improved HTTP request function with better error handling
-function makeHttpRequest(
+async function makeHttpRequest(
   url: string, 
   method: string, 
   headers: Record<string, string>, 
   body?: any
 ): Promise<any> {
+  // Check if we're using the API proxy
+  const isUsingProxy = url.startsWith('/api/proxy');
+  
+  // If using the API proxy, use fetch with standard options
+  if (isUsingProxy) {
+    try {
+      const response = await fetch(url, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        try {
+          return JSON.parse(errorText);
+        } catch {
+          throw new Error(`Request failed with status ${response.status}: ${errorText}`);
+        }
+      }
+      
+      return await response.json();
+    } catch (error: any) {
+      console.error('Error in fetch request:', error);
+      throw {
+        code: 'NetworkError',
+        message: error.message,
+        details: error
+      };
+    }
+  }
+  
+  // Otherwise use the original https implementation with certificate bypass
   return new Promise((resolve, reject) => {
-    // Create a custom agent that ignores SSL certificate issues in non-production
+    // Create a custom agent that ignores SSL certificate issues
     const httpsAgent = new https.Agent({
-      rejectUnauthorized: process.env.NODE_ENV === 'production',
+      rejectUnauthorized: false // Always bypass certificate validation for direct connections
     });
     
     const options = {
@@ -139,33 +175,45 @@ function makeHttpRequest(
   });
 }
 
-// Function to make the dispense API call from server-side
+// Function to make the dispense API call
 export async function dispenseProduct(requestData: DispenseRequest): Promise<DispenseResponse | ErrorResponse> {
-  const token = generateJwtToken();
-  
-  // Check if environment variables are set
-  if (!API_CONFIG.userId || !API_CONFIG.name || !API_CONFIG.secretKey) {
-    console.error('Missing Recharge360 API credentials in environment variables');
-    return {
-      requestId: requestData.requestId,
-      code: 'ConfigError',
-      message: 'API credentials not properly configured',
-      rrn: '',
-    };
-  }
-  
   try {
-    // Ensure URL ends with '/'
-    const baseUrl = API_CONFIG.url.endsWith('/') ? API_CONFIG.url : `${API_CONFIG.url}/`;
-    const fullUrl = `${baseUrl}api/dispense`;
+    // If using the API proxy, we don't need a token
+    const isUsingProxy = API_CONFIG.url.startsWith('/api/proxy');
+    const token = isUsingProxy ? '' : generateJwtToken();
+    
+    // Check if environment variables are set (only needed for direct connection)
+    if (!isUsingProxy && (!API_CONFIG.userId || !API_CONFIG.name || !API_CONFIG.secretKey)) {
+      console.error('Missing Recharge360 API credentials in environment variables');
+      return {
+        requestId: requestData.requestId,
+        code: 'ConfigError',
+        message: 'API credentials not properly configured',
+        rrn: '',
+      };
+    }
+    
+    // Determine the final URL
+    let fullUrl: string;
+    if (isUsingProxy) {
+      fullUrl = `${API_CONFIG.url}/dispense`;
+    } else {
+      // Ensure URL ends with '/'
+      const baseUrl = API_CONFIG.url.endsWith('/') ? API_CONFIG.url : `${API_CONFIG.url}/`;
+      fullUrl = `${baseUrl}api/dispense`;
+    }
     
     console.log(`Making request to: ${fullUrl}`);
     
-    const headers = {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
-      'Authorization': `Bearer ${token}`,
     };
+    
+    // Add authorization header if needed
+    if (!isUsingProxy) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
     
     const response = await makeHttpRequest(fullUrl, 'POST', headers, requestData);
     return response;
@@ -182,32 +230,44 @@ export async function dispenseProduct(requestData: DispenseRequest): Promise<Dis
   }
 }
 
-// Function to get wallet balance with improved error handling
+// Function to get wallet balance
 export async function getWalletBalance(): Promise<WalletResponse | ErrorResponse> {
-  const token = generateJwtToken();
-  
-  // Check if environment variables are set
-  if (!API_CONFIG.userId || !API_CONFIG.name || !API_CONFIG.secretKey) {
-    console.error('Missing Recharge360 API credentials in environment variables');
-    return {
-      requestId: 'wallet_inquiry',
-      code: 'ConfigError',
-      message: 'API credentials not properly configured',
-      rrn: '',
-    };
-  }
-  
   try {
-    // Ensure URL ends with '/'
-    const baseUrl = API_CONFIG.url.endsWith('/') ? API_CONFIG.url : `${API_CONFIG.url}/`;
-    const fullUrl = `${baseUrl}v1/wallet`;
+    // If using the API proxy, we don't need a token
+    const isUsingProxy = API_CONFIG.url.startsWith('/api/proxy');
+    const token = isUsingProxy ? '' : generateJwtToken();
+    
+    // Check if environment variables are set (only needed for direct connection)
+    if (!isUsingProxy && (!API_CONFIG.userId || !API_CONFIG.name || !API_CONFIG.secretKey)) {
+      console.error('Missing Recharge360 API credentials in environment variables');
+      return {
+        requestId: 'wallet_inquiry',
+        code: 'ConfigError',
+        message: 'API credentials not properly configured',
+        rrn: '',
+      };
+    }
+    
+    // Determine the final URL
+    let fullUrl: string;
+    if (isUsingProxy) {
+      fullUrl = `${API_CONFIG.url}/wallet`;
+    } else {
+      // Ensure URL ends with '/'
+      const baseUrl = API_CONFIG.url.endsWith('/') ? API_CONFIG.url : `${API_CONFIG.url}/`;
+      fullUrl = `${baseUrl}v1/wallet`;
+    }
     
     console.log(`Making request to: ${fullUrl}`);
     
-    const headers = {
+    const headers: Record<string, string> = {
       'Accept': 'application/json',
-      'Authorization': `Bearer ${token}`,
     };
+    
+    // Add authorization header if needed
+    if (!isUsingProxy) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
     
     const response = await makeHttpRequest(fullUrl, 'GET', headers);
     return response;

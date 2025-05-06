@@ -1,7 +1,8 @@
 "use server"
 
 import { NextResponse } from 'next/server';
-import { dispenseProduct, DispenseRequest, generateRequestId } from '@/lib/recharge360';
+import { dispenseProduct, DispenseRequest, generateRequestId, getWalletBalance } from '@/lib/recharge360';
+import { NextApiRequest, NextApiResponse } from 'next';
 import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
@@ -118,5 +119,48 @@ export async function POST(request: Request) {
       { code: 'SERVER_ERROR', message: errorMessage },
       { status: 500 }
     );
+  }
+}
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  try {
+    // Only allow GET requests
+    if (req.method !== 'GET') {
+      return res.status(405).json({ message: 'Method Not Allowed' });
+    }
+    
+    // Test which environment we're in
+    const isVercel = process.env.NEXT_PUBLIC_VERCEL_URL ? true : false;
+    
+    // Test wallet balance
+    console.log('Testing wallet balance...');
+    const walletResult = await getWalletBalance();
+    
+    // Test dispense product (using a test product if available)
+    console.log('Testing dispense product...');
+    const dispenseResult = await dispenseProduct({
+      requestId: generateRequestId(),
+      productCode: 'TEST_PRODUCT', // Replace with an actual test product code
+      recipient: '09123456789', // Replace with a valid test recipient
+    });
+    
+    // Return the test results
+    return res.status(200).json({
+      isVercel,
+      environment: process.env.NODE_ENV,
+      baseUrl: process.env.NEXT_PUBLIC_RECHARGE360_BASE_URL,
+      vercelUrl: process.env.NEXT_PUBLIC_VERCEL_URL,
+      walletResult,
+      dispenseResult,
+    });
+  } catch (error) {
+    console.error('Test API error:', error);
+    return res.status(500).json({ 
+      message: 'Error testing Recharge360 API', 
+      error: error instanceof Error ? error.message : 'Unknown error' 
+    });
   }
 }

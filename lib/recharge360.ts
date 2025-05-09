@@ -5,7 +5,7 @@ import https from 'https';
 const API_CONFIG = {
   // Use the API proxy in production (Vercel), direct connection in development
   url: process.env.NEXT_PUBLIC_VERCEL_URL 
-    ? `/api/proxy` 
+    ? `/api/` 
     : process.env.NEXT_PUBLIC_RECHARGE360_BASE_URL || '',
   userId: process.env.RECHARGE360_USER_ID,
   name: process.env.RECHARGE360_NAME,
@@ -71,7 +71,7 @@ async function makeHttpRequest(
   body?: any
 ): Promise<any> {
   // Check if we're using the API proxy
-  const isUsingProxy = url.startsWith('/api/proxy');
+  const isUsingProxy = url.startsWith('/api/');
   
   // If using the API proxy, use fetch with standard options
   if (isUsingProxy) {
@@ -179,7 +179,7 @@ async function makeHttpRequest(
 export async function dispenseProduct(requestData: DispenseRequest): Promise<DispenseResponse | ErrorResponse> {
   try {
     // If using the API proxy, we don't need a token
-    const isUsingProxy = API_CONFIG.url.startsWith('/api/proxy');
+    const isUsingProxy = API_CONFIG.url.startsWith('/api/');
     const token = isUsingProxy ? '' : generateJwtToken();
     
     // Check if environment variables are set (only needed for direct connection)
@@ -234,7 +234,7 @@ export async function dispenseProduct(requestData: DispenseRequest): Promise<Dis
 export async function getWalletBalance(): Promise<WalletResponse | ErrorResponse> {
   try {
     // If using the API proxy, we don't need a token
-    const isUsingProxy = API_CONFIG.url.startsWith('/api/proxy');
+    const isUsingProxy = API_CONFIG.url.startsWith('/api/');
     const token = isUsingProxy ? '' : generateJwtToken();
     
     // Check if environment variables are set (only needed for direct connection)

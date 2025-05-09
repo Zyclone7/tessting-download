@@ -1,9 +1,9 @@
 import crypto from 'crypto';
-import https from 'https';
+// Removed https import
 
 // Recharge360 API configuration using environment variables
 const API_CONFIG = {
-  url: process.env.NEXT_PUBLIC_RECHARGE360_BASE_URL || 'https://3.1.236.143/',
+  url: process.env.NEXT_PUBLIC_RECHARGE360_BASE_URL || 'http://3.1.236.143/',
   userId: process.env.RECHARGE360_USER_ID,
   name: process.env.RECHARGE360_NAME,
   secretKey: process.env.RECHARGE360_SECRET_KEY,
@@ -60,83 +60,69 @@ export type ErrorResponse = {
   rrn: string;
 };
 
-// Improved HTTP request function with better error handling
+// Improved HTTP request function using fetch instead of https
 function makeHttpRequest(
   url: string, 
   method: string, 
   headers: Record<string, string>, 
   body?: any
 ): Promise<any> {
-  return new Promise((resolve, reject) => {
-    // Create a custom agent that ignores SSL certificate issues in non-production
-    const httpsAgent = new https.Agent({
-      rejectUnauthorized: process.env.NODE_ENV === 'production',
-    });
-    
-    const options = {
-      method,
-      headers,
-      agent: httpsAgent,
-    };
-    
-    const req = https.request(url, options, (res) => {
-      let data = '';
+  const options: RequestInit = {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  };
+  
+  return fetch(url, options)
+    .then(async (response) => {
+      const data = await response.text();
       
-      res.on('data', (chunk) => {
-        data += chunk;
-      });
-      
-      res.on('end', () => {
-        // Check if the response is successful (2xx status code)
-        if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
-          try {
-            // Try to parse as JSON
-            const jsonData = JSON.parse(data);
-            resolve(jsonData);
-          } catch (error) {
-            // If not valid JSON, create an error response with the raw data
-            reject({
-              code: 'ResponseFormatError',
-              message: `Invalid JSON response. Status: ${res.statusCode}`,
-              details: data.slice(0, 100) + (data.length > 100 ? '...' : '') // Include part of the response for debugging
-            });
-          }
-        } else {
-          // Handle non-2xx status codes
-          try {
-            // Try to parse error response as JSON first
-            const errorData = JSON.parse(data);
-            reject({
-              code: `StatusError${res.statusCode}`,
-              message: `Request failed with status ${res.statusCode}`,
-              details: errorData
-            });
-          } catch (error) {
-            // If not valid JSON, return raw error response
-            reject({
-              code: `StatusError${res.statusCode}`,
-              message: `Request failed with status ${res.statusCode}`,
-              details: data.slice(0, 100) + (data.length > 100 ? '...' : '')
-            });
-          }
+      // Check if the response is successful
+      if (response.ok) {
+        try {
+          // Try to parse as JSON
+          return JSON.parse(data);
+        } catch (error) {
+          // If not valid JSON, create an error response with the raw data
+          throw {
+            code: 'ResponseFormatError',
+            message: `Invalid JSON response. Status: ${response.status}`,
+            details: data.slice(0, 100) + (data.length > 100 ? '...' : '')
+          };
         }
-      });
-    });
-    
-    req.on('error', (error) => {
-      reject({
+      } else {
+        // Handle non-2xx status codes
+        try {
+          // Try to parse error response as JSON first
+          const errorData = JSON.parse(data);
+          throw {
+            code: `StatusError${response.status}`,
+            message: `Request failed with status ${response.status}`,
+            details: errorData
+          };
+        } catch (error) {
+          // If not valid JSON, return raw error response
+          throw {
+            code: `StatusError${response.status}`,
+            message: `Request failed with status ${response.status}`,
+            details: data.slice(0, 100) + (data.length > 100 ? '...' : '')
+          };
+        }
+      }
+    })
+    .catch((error) => {
+      if (error.code) {
+        // Already formatted error from above
+        throw error;
+      }
+      
+      // Network or other fetch errors
+      throw {
         code: 'NetworkError',
-        message: error.message,
+        message: error.message || 'Network error occurred',
         details: error
-      });
+      };
     });
-    
-    if (body) {
-      req.write(JSON.stringify(body));
-    }
-    
-    req.end();
-  });
 }
 
 // Function to make the dispense API call from server-side
@@ -155,7 +141,7 @@ export async function dispenseProduct(requestData: DispenseRequest): Promise<Dis
   }
   
   try {
-    // Ensure URL ends with '/'
+    // Ensure URL ends with '/' and use http instead of https
     const baseUrl = API_CONFIG.url.endsWith('/') ? API_CONFIG.url : `${API_CONFIG.url}/`;
     const fullUrl = `${baseUrl}api/dispense`;
     
@@ -198,7 +184,7 @@ export async function getWalletBalance(): Promise<WalletResponse | ErrorResponse
   }
   
   try {
-    // Ensure URL ends with '/'
+    // Ensure URL ends with '/' and use http instead of https
     const baseUrl = API_CONFIG.url.endsWith('/') ? API_CONFIG.url : `${API_CONFIG.url}/`;
     const fullUrl = `${baseUrl}v1/wallet`;
     

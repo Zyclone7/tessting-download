@@ -1,9 +1,9 @@
 import crypto from 'crypto';
-import https from 'https';
+import http from 'http';
 
 // Recharge360 API configuration using environment variables
 const API_CONFIG = {
-  url: process.env.NEXT_PUBLIC_RECHARGE360_BASE_URL || 'https://3.1.236.143/',
+  url: process.env.NEXT_PUBLIC_RECHARGE360_BASE_URL || 'http://localhost:3000/',
   userId: process.env.RECHARGE360_USER_ID,
   name: process.env.RECHARGE360_NAME,
   secretKey: process.env.RECHARGE360_SECRET_KEY,
@@ -68,18 +68,18 @@ function makeHttpRequest(
   body?: any
 ): Promise<any> {
   return new Promise((resolve, reject) => {
-    // Create a custom agent that ignores SSL certificate issues in non-production
-    const httpsAgent = new https.Agent({
-      rejectUnauthorized: process.env.NODE_ENV === 'production',
-    });
+    // Parse URL to get hostname, path, and port
+    const urlObj = new URL(url);
     
     const options = {
+      hostname: urlObj.hostname,
+      port: urlObj.port || 80, // Default HTTP port
+      path: urlObj.pathname + urlObj.search,
       method,
       headers,
-      agent: httpsAgent,
     };
     
-    const req = https.request(url, options, (res) => {
+    const req = http.request(options, (res) => {
       let data = '';
       
       res.on('data', (chunk) => {
